@@ -3,7 +3,11 @@
  * стола» спрашивают одного игрока — один запрос, а не два. Ошибки не кэшируются.
  */
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { fetchRoleBreakdown, resetRoleBreakdownCacheForTest } from "@core/polemica-api";
+import {
+  fetchFirstKilled,
+  fetchRoleBreakdown,
+  resetRoleBreakdownCacheForTest,
+} from "@core/polemica-api";
 
 let calls = 0;
 let fail = false;
@@ -49,5 +53,43 @@ describe("fetchRoleBreakdown", () => {
   test("не-объект в ответе — ошибка, а не кэш мусора", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => [1, 2] })));
     await expect(fetchRoleBreakdown(9)).rejects.toThrow("invalid");
+  });
+});
+
+describe("fetchFirstKilled", () => {
+  const ok = (body: unknown) =>
+    vi.fn(async () => {
+      calls++;
+      await Promise.resolve();
+      return { ok: true, json: async () => body };
+    });
+
+  test("читает игры за красных и ПУ из строки get-role-statistic", async () => {
+    vi.stubGlobal("fetch", ok([{ games_count: 120, first_killed_count: 24, wins_count: 60 }]));
+    await expect(fetchFirstKilled(7)).resolves.toEqual({ games: 120, firstKilled: 24 });
+  });
+
+  test("запрос — роли мирный и шериф, лига", async () => {
+    const f = ok([{ games_count: 1, first_killed_count: 0 }]);
+    vi.stubGlobal("fetch", f);
+    await fetchFirstKilled(7);
+    const url = String((f.mock.calls[0] as unknown[])[0]);
+    expect(url).toContain("get-role-statistic?user_id=7");
+    expect(url).toContain("role=civilian%2Csheriff");
+    expect(url).toContain("game_type=league");
+  });
+
+  test("параллельные и повторные вызовы — один запрос, кэш отдельный от get-statistic", async () => {
+    vi.stubGlobal("fetch", ok([{ games_count: 5, first_killed_count: 1 }]));
+    await Promise.all([fetchFirstKilled(7), fetchFirstKilled("7")]);
+    await fetchFirstKilled(7);
+    expect(calls).toBe(1);
+  });
+
+  test("не массив и пустой массив — ошибка, а не нули в кэше", async () => {
+    vi.stubGlobal("fetch", ok({ games_count: 5 }));
+    await expect(fetchFirstKilled(8)).rejects.toThrow("invalid");
+    vi.stubGlobal("fetch", ok([]));
+    await expect(fetchFirstKilled(9)).rejects.toThrow("invalid");
   });
 });

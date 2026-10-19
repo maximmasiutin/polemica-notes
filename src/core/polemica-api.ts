@@ -149,13 +149,54 @@ const ROLE_BREAKDOWN_TIMEOUT_MS = 15_000;
 /** Ограничитель кэша: за вечер столы сменяются, память не должна расти. */
 const ROLE_BREAKDOWN_CACHE_LIMIT = 300;
 
-const roleBreakdownCache = new Map<string, { at: number; data: RoleBreakdownRaw }>();
-const roleBreakdownInFlight = new Map<string, Promise<RoleBreakdownRaw>>();
+interface ProfileCache<T> {
+  done: Map<string, { at: number; data: T }>;
+  inFlight: Map<string, Promise<T>>;
+}
+
+const roleBreakdownCache: ProfileCache<RoleBreakdownRaw> = { done: new Map(), inFlight: new Map() };
+const firstKilledCache: ProfileCache<FirstKilledRaw> = { done: new Map(), inFlight: new Map() };
 
 /** Тестовый шов: кэш живёт 5 минут и переживал бы соседний тест. */
 export function resetRoleBreakdownCacheForTest(): void {
-  roleBreakdownCache.clear();
-  roleBreakdownInFlight.clear();
+  for (const c of [roleBreakdownCache, firstKilledCache]) {
+    c.done.clear();
+    c.inFlight.clear();
+  }
+}
+
+/**
+ * Профильный запрос с кэшем на всех потребителей: дедуп параллельных вызовов,
+ * срок 5 минут, потолок записей, таймаут, ошибки не кэшируются.
+ */
+function cachedProfileFetch<T>(
+  cache: ProfileCache<T>,
+  key: string,
+  url: string,
+  parse: (data: unknown) => T,
+): Promise<T> {
+  const cached = cache.done.get(key);
+  if (cached && Date.now() - cached.at < ROLE_BREAKDOWN_TTL_MS) {
+    return Promise.resolve(cached.data);
+  }
+  const pending = cache.inFlight.get(key);
+  if (pending) return pending;
+  const request = fetch(url, { signal: AbortSignal.timeout(ROLE_BREAKDOWN_TIMEOUT_MS) })
+    .then(async (response) => {
+      if (!response.ok) throw new Error(`stats API ${response.status}`);
+      const data = parse(await response.json());
+      if (cache.done.size >= ROLE_BREAKDOWN_CACHE_LIMIT) {
+        const oldest = cache.done.keys().next().value;
+        if (oldest !== undefined) cache.done.delete(oldest);
+      }
+      cache.done.set(key, { at: Date.now(), data });
+      return data;
+    })
+    .finally(() => {
+      if (cache.inFlight.get(key) === request) cache.inFlight.delete(key);
+    });
+  cache.inFlight.set(key, request);
+  return request;
 }
 
 /**
@@ -163,36 +204,48 @@ export function resetRoleBreakdownCacheForTest(): void {
  * godfather → wins_count/games_count). ОДИН общий кэш на всех потребителей:
  * статистика на плитках и «Сводка стола» (09.10.2026) запрашивают одного и
  * того же игрока — без общего слоя стол из 10 человек давал бы 20 запросов
- * вместо 10. Дедуп параллельных вызовов, таймаут, ошибки не кэшируются.
+ * вместо 10.
  */
 export function fetchRoleBreakdown(userId: number | string): Promise<RoleBreakdownRaw> {
   const key = String(userId);
-  const cached = roleBreakdownCache.get(key);
-  if (cached && Date.now() - cached.at < ROLE_BREAKDOWN_TTL_MS) {
-    return Promise.resolve(cached.data);
-  }
-  const pending = roleBreakdownInFlight.get(key);
-  if (pending) return pending;
-  const request = fetch(
+  return cachedProfileFetch(
+    roleBreakdownCache,
+    key,
     `https://polemicagame.com/profile/default/get-statistic?user_id=${encodeURIComponent(key)}&game_type=league&scoring_type=scoring_2%2Cscoring_3`,
-    { signal: AbortSignal.timeout(ROLE_BREAKDOWN_TIMEOUT_MS) },
-  )
-    .then(async (response) => {
-      if (!response.ok) throw new Error(`stats API ${response.status}`);
-      const data: unknown = await response.json();
+    (data) => {
       if (!data || typeof data !== "object" || Array.isArray(data)) {
         throw new Error("stats API returned invalid data");
       }
-      if (roleBreakdownCache.size >= ROLE_BREAKDOWN_CACHE_LIMIT) {
-        const oldest = roleBreakdownCache.keys().next().value;
-        if (oldest !== undefined) roleBreakdownCache.delete(oldest);
-      }
-      roleBreakdownCache.set(key, { at: Date.now(), data: data as RoleBreakdownRaw });
       return data as RoleBreakdownRaw;
-    })
-    .finally(() => {
-      if (roleBreakdownInFlight.get(key) === request) roleBreakdownInFlight.delete(key);
-    });
-  roleBreakdownInFlight.set(key, request);
-  return request;
+    },
+  );
+}
+
+// ────────── первый убитый за красных (get-role-statistic, 19.10.2026) ──────────
+
+/** Игры за красных (мирный + шериф) и сколько раз игрок в них был первым убитым. */
+export interface FirstKilledRaw {
+  games: number;
+  firstKilled: number;
+}
+
+/**
+ * get-role-statistic отвечает массивом из одной строки с games_count и
+ * first_killed_count (docs/site-api.md). Роль — мирный и шериф, та же выборка,
+ * что у «Отстрелов» в статистике на плитках (player-stats, killcount).
+ */
+export function fetchFirstKilled(userId: number | string): Promise<FirstKilledRaw> {
+  const key = String(userId);
+  return cachedProfileFetch(
+    firstKilledCache,
+    key,
+    `https://polemicagame.com/profile/default/get-role-statistic?user_id=${encodeURIComponent(key)}&role=civilian%2Csheriff&game_type=league&scoring_type=scoring_2%2Cscoring_3`,
+    (data) => {
+      const row: unknown = Array.isArray(data) ? data[0] : undefined;
+      if (!row || typeof row !== "object") throw new Error("stats API returned invalid data");
+      const r = row as { games_count?: unknown; first_killed_count?: unknown };
+      const n = (v: unknown) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : 0);
+      return { games: n(r.games_count), firstKilled: n(r.first_killed_count) };
+    },
+  );
 }

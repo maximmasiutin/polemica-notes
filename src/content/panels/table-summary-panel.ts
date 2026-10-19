@@ -2,7 +2,7 @@
  * «Сводка стола» — плавающее окно в игровой комнате (09.10.2026).
  *
  * Игроки за столом: место, ник, MMR, игры и винрейт за красных (мирный +
- * шериф) и за чёрных (мафия + дон). Цвет строки — по MMR (тройка сверху,
+ * шериф) и за чёрных (мафия + дон), ПУ% — как часто игрока стреляют первым. Цвет строки — по MMR (тройка сверху,
  * тройка снизу), сортировка — по месту, «сильные чёрные» или «сильные
  * красные». Арифметика — в @shared/table-summary, сеть — в @core/polemica-api
  * (общий кэш со статистикой на плитках: один игрок — один запрос).
@@ -15,11 +15,17 @@ import { onDomChange } from "@core/dom";
 import { log } from "@core/log";
 import { SITE } from "@core/selectors";
 import { setSettings } from "@core/settings";
-import { fetchActiveGames, fetchRoleBreakdown, findRatingPlayer } from "@core/polemica-api";
+import {
+  fetchActiveGames,
+  fetchFirstKilled,
+  fetchRoleBreakdown,
+  findRatingPlayer,
+} from "@core/polemica-api";
 import { rememberSeenPlayers } from "@core/seen-players";
 import { isGameRoomPath } from "@shared/routes";
 import {
   SORT_MODES,
+  firstKilledPct,
   mmrTiers,
   roleTotals,
   sortModeLabel,
@@ -83,7 +89,7 @@ class TableSummaryPanel extends FloatingPanel {
     super({
       storageKey: "table-summary",
       title: "Сводка стола",
-      width: 340,
+      width: 380,
       height: 330,
       minWidth: 260,
       minHeight: 160,
@@ -98,7 +104,7 @@ class TableSummaryPanel extends FloatingPanel {
     this.addHeaderButton("×", () => void requestClose(), "Закрыть (выключает окно в настройках)");
     const style = document.createElement("style");
     style.textContent =
-      ".pn-table-summary-panel .pn-ts-row{display:grid;grid-template-columns:22px 1fr 46px 62px 62px;" +
+      ".pn-table-summary-panel .pn-ts-row{display:grid;grid-template-columns:22px 1fr 46px 56px 56px 44px;" +
       "gap:4px;align-items:center;padding:3px 4px;border-radius:6px;font:12px/1.4 system-ui,sans-serif;color:#fff;}" +
       ".pn-table-summary-panel .pn-ts-head{opacity:.65;font-size:11px;}" +
       ".pn-table-summary-panel .pn-ts-nick{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#fff;text-decoration:none;}" +
@@ -132,7 +138,7 @@ class TableSummaryPanel extends FloatingPanel {
       list.appendChild(empty);
       return;
     }
-    list.appendChild(buildRow(["№", "Ник", "MMR", "Мир", "Маф"], true));
+    list.appendChild(buildRow(["№", "Ник", "MMR", "Мир", "Маф", "ПУ%"], true));
     const tiers = mmrTiers(rows);
     for (const r of sortRows(rows, sortMode)) {
       const row = document.createElement("div");
@@ -143,6 +149,7 @@ class TableSummaryPanel extends FloatingPanel {
       row.appendChild(cell(r.mmr === null ? "—" : String(r.mmr), "pn-ts-num"));
       row.appendChild(sideCell(r, "civ"));
       row.appendChild(sideCell(r, "maf"));
+      row.appendChild(firstKilledCell(r));
       list.appendChild(row);
     }
   }
@@ -184,6 +191,18 @@ function sideCell(r: SummaryRow, side: "civ" | "maf"): HTMLElement {
   const el = cell(wr === null ? "—" : `${wr.toFixed(0)}%`, "pn-ts-num");
   el.title = `${games} игр${wr === null ? "" : `, винрейт ${wr}%`}`;
   if (games < 10) el.classList.add("pn-ts-dim"); // мало игр — цифре верить осторожно
+  return el;
+}
+
+/** ПУ%: доля игр за красных, где игрока застрелили первым. */
+function firstKilledCell(r: SummaryRow): HTMLElement {
+  if (r.status === "loading") return cell("…", "pn-ts-num pn-ts-dim");
+  const fk = r.firstKilled;
+  if (!fk) return cell("—", "pn-ts-num pn-ts-dim");
+  const pct = firstKilledPct(fk.count, fk.games);
+  const el = cell(pct === null ? "—" : `${pct}%`, "pn-ts-num");
+  el.title = `${fk.games} игр за красных, первым убит ${fk.count}`;
+  if (fk.games < 10) el.classList.add("pn-ts-dim");
   return el;
 }
 
@@ -240,6 +259,7 @@ async function resolveTable(manual = false): Promise<void> {
     id: null,
     mmr: null,
     totals: null,
+    firstKilled: null,
     status: "loading" as const,
   }));
   rerender();
@@ -298,15 +318,23 @@ async function resolveTable(manual = false): Promise<void> {
   const worker = async () => {
     while (queue.length > 0) {
       const row = queue.shift() as SummaryRow;
-      try {
-        const raw = await fetchRoleBreakdown(row.id as string);
-        if (gen !== generation || !active) return;
-        row.totals = roleTotals(raw);
+      // ПУ — отдельный запрос: его отказ оставляет «—» в своей колонке, не всю строку.
+      const [breakdown, firstKilled] = await Promise.allSettled([
+        fetchRoleBreakdown(row.id as string),
+        fetchFirstKilled(row.id as string),
+      ]);
+      if (gen !== generation || !active) return;
+      if (breakdown.status === "fulfilled") {
+        row.totals = roleTotals(breakdown.value);
         row.status = "ok";
-      } catch (e) {
-        if (gen !== generation || !active) return;
+      } else {
         row.status = "unavailable";
-        log.warn(SCOPE, "статистика игрока не загрузилась", e);
+        log.warn(SCOPE, "статистика игрока не загрузилась", breakdown.reason);
+      }
+      if (firstKilled.status === "fulfilled") {
+        row.firstKilled = { games: firstKilled.value.games, count: firstKilled.value.firstKilled };
+      } else {
+        log.warn(SCOPE, "ПУ игрока не загрузился", firstKilled.reason);
       }
       rerender();
     }

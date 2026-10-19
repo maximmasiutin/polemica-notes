@@ -6,6 +6,7 @@
 import { describe, expect, test } from "vitest";
 import {
   MIN_GAMES_FOR_RANK,
+  firstKilledPct,
   mmrTiers,
   roleTotals,
   sortRows,
@@ -14,7 +15,7 @@ import {
 } from "@shared/table-summary";
 
 function row(seat: number, over: Partial<SummaryRow> = {}): SummaryRow {
-  return { seat, nick: `p${seat}`, id: String(seat), mmr: null, totals: null, status: "ok", ...over };
+  return { seat, nick: `p${seat}`, id: String(seat), mmr: null, totals: null, firstKilled: null, status: "ok", ...over };
 }
 
 describe("roleTotals", () => {
@@ -46,6 +47,18 @@ describe("winratePct", () => {
   test("процент с одним знаком; побед больше игр не бывает", () => {
     expect(winratePct(1, 3)).toBe(33.3);
     expect(winratePct(9, 3)).toBe(100);
+  });
+});
+
+describe("firstKilledPct", () => {
+  test("ноль игр за красных — null", () => {
+    expect(firstKilledPct(0, 0)).toBeNull();
+  });
+  test("целый процент с округлением; ПУ больше игр не бывает", () => {
+    expect(firstKilledPct(24, 120)).toBe(20);
+    expect(firstKilledPct(1, 3)).toBe(33);
+    expect(firstKilledPct(2, 3)).toBe(67);
+    expect(firstKilledPct(9, 3)).toBe(100);
   });
 });
 

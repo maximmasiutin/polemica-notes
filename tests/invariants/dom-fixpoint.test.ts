@@ -74,6 +74,7 @@ vi.mock("@core/polemica-api", () => ({
     civilian: { games_count: 30, wins_count: 18 },
     mafia: { games_count: 12, wins_count: 6 },
   })),
+  fetchFirstKilled: vi.fn(async () => ({ games: 30, firstKilled: 7 })),
 }));
 
 // ВАЖНО: @core/dom НЕ мокается — конвейер настоящий.
@@ -289,6 +290,8 @@ describe("§4 fixpoint: «Сводка стола»", () => {
     expect(panelText).toContain("Альфа");
     expect(panelText).toContain("2500");
     expect(panelText, "винрейт за красных 18/30").toContain("60%");
+    expect(panelText, "колонка ПУ%").toContain("ПУ%");
+    expect(panelText, "ПУ 7/30 — целый процент").toContain("23%");
   });
 
   test("стол опустел в комнате: окно показывает пустой стол, а не старый состав", async () => {

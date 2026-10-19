@@ -41,6 +41,15 @@ export function winratePct(wins: number, games: number): number | null {
   return Math.round((Math.min(wins, games) / games) * 1000) / 10;
 }
 
+/**
+ * ПУ% — доля игр за красных, в которых игрока застрелили первым, целым процентом;
+ * null — игр за красных нет.
+ */
+export function firstKilledPct(count: number, games: number): number | null {
+  if (!(games > 0)) return null;
+  return Math.round((Math.min(count, games) / games) * 100);
+}
+
 export interface SummaryRow {
   /** Место за столом, 1..10. */
   seat: number;
@@ -50,6 +59,8 @@ export interface SummaryRow {
   mmr: number | null;
   /** null — статистика ещё не загружена или недоступна. */
   totals: RoleTotals | null;
+  /** Первый убитый за красных; null — не загружено или недоступно. */
+  firstKilled: { games: number; count: number } | null;
   status: "loading" | "ok" | "unavailable";
 }
 
