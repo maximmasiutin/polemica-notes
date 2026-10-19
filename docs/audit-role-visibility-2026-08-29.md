@@ -222,6 +222,9 @@ inline-пин, но сайт остаётся на `#stop`.
 | auto-start inline/peek | `display`, `visibility`, `opacity`, `pointer-events` | своя роль | обычный inline | Нет |
 | role-faker | `display:none` | чужие роли | обычный inline | Observer повторяет, но snapshot теряется |
 | role-faker fake | SVG href, tooltip, data-атрибуты | своя роль | DOM-атрибуты | Нет |
+| notes.css (19.10.2026) | `display:none` тултипа сайта при спрайте `#stop` | роль с `#stop` | stylesheet `!important` (`:has`) | Да |
+| auto-start CSS (19.10.2026) | `display:none` тултипа сайта | все роли | stylesheet `!important` | Да |
+| role-marker title (19.10.2026) | снятие `title` «Мой read» при скрытых ролях | метки «мой read» | DOM-атрибут | Да (перерисовка по paintKey) |
 | сайт | `#stop`, Vue-state и обычные стили | своя роль | ниже наших `!important` | Новый узел стирает extension-inline |
 
 Inline `!important` OBS перебивает CSS `!important`, но `display:none`

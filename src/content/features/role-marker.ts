@@ -12,6 +12,7 @@ import { log } from "@core/log";
 import { showToast } from "@core/toast";
 import { SITE, SITE_CLASS } from "@core/selectors";
 import { createRoleSvg } from "../role-sprite";
+import { rolesHidden } from "../roles-hidden";
 import type { Feature } from "@core/feature";
 
 interface RoleDef {
@@ -203,7 +204,10 @@ export function paintMarker(marker: HTMLElement, roleId: string): void {
   // В ключе идемпотентности и ВИД: смена настройки «иконки/текст» обязана
   // перерисовать метку с той же ролью, а прежний гейт по одной роли её
   // пропускал бы до конца игры.
-  const paintKey = `${roleId}|${useIcons ? "icon" : "text"}`;
+  // В ключе и скрытость ролей: подсказка «Мой read: …» называет роль и при
+  // скрытых ролях снимается, а при показе возвращается.
+  const hidden = rolesHidden();
+  const paintKey = `${roleId}|${useIcons ? "icon" : "text"}|${hidden ? "hidden" : "shown"}`;
   if (marker.dataset.role === paintKey) return;
   const r = roleById(roleId);
   marker.dataset.role = paintKey;
@@ -213,7 +217,8 @@ export function paintMarker(marker: HTMLElement, roleId: string): void {
   // рисует сама комната. Сброс («?») остаётся текстом: у него иконки нет.
   if (useIcons && r.sprite) marker.innerHTML = createRoleSvg(r.sprite, 14);
   else marker.textContent = r.abbr;
-  marker.title = `Мой read: ${r.label}`;
+  if (hidden) marker.removeAttribute("title");
+  else marker.title = `Мой read: ${r.label}`;
 }
 
 /** Тестовый шов и приёмник настройки. */

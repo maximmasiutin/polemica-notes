@@ -637,6 +637,8 @@ describe("settings, release and manifest consistency", () => {
         "player__info",
         "player__botleftmenu",
         "player",
+        "player__role",
+        "tooltip",
         // НАША разметка с общими именами: внутри .player-stats / .pn-tooltip.
         "player-icons",
         "mmr",

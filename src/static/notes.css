@@ -13,6 +13,13 @@
     position: relative !important;
 }
 
+/* Роль скрыта сайтом (спрайт «#stop»), а его тултип внутри того же узла по-прежнему
+   пишет «Ваша роль - …»: наведение мыши раскрывало спрятанную роль. */
+.player__role:has(use[href*="#stop"]) .tooltip,
+.player__role:has(use[*|href*="#stop"]) .tooltip {
+    display: none !important;
+}
+
 /* Сделаем контейнер информации якорем для иконок */
 .player__info {
     position: relative !important;

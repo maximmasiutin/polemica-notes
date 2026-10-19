@@ -614,6 +614,9 @@ const ROLE_HIDE_CSS = `
         opacity: 0 !important;
         pointer-events: none !important;
     }
+    .player__role .tooltip {
+        display: none !important;
+    }
 `;
 
 function hideAllRolesCSS() {
